@@ -57,4 +57,6 @@ void CServerSocket::OnClose(int nErrorCode) {
 		m_pDlg->RemoveClientFromList(this);
 	}
 	AfxMessageBox(dissMsg);
+
+	CAsyncSocket::OnClose(nErrorCode);
 }

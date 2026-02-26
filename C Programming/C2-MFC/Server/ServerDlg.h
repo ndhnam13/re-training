@@ -39,6 +39,7 @@ public:
 	afx_msg void OnLbnSelchangeList1();
 	void AddClientToList(CString clientInfo, CServerSocket* pClient);
 	void RemoveClientFromList(CServerSocket* pClient);
+	void NewWindow(CServerSocket* pClient);
 private:
 	std::vector<CAsyncSocket*> m_ClientsList;
 	//ServerSocket

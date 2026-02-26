@@ -204,9 +204,32 @@ void CServerDlg::OnBnClickedButtonStopListening()
 }
 
 void CServerDlg::OnLbnSelchangeList1() {
-	// TODO: Add your control notification handler code here
-	CString windowTitle;
-	MessageBoxA(NULL, "You selected me", "Server", MB_YESNO);
+	/* TODO: When clicked on an index, show message box
+	* Use the choosen client IP:PORT
+	* Chose TYPE of CMD to send to client
+	*/ 
+	int nIndex = m_ClientBox.GetCurSel(); // Get the current selected item
+	if (nIndex != LB_ERR) {
+		CServerSocket* pClient = (CServerSocket*)m_ClientBox.GetItemDataPtr(nIndex);
+		if (pClient != NULL) {
+			CString peerName;
+			UINT peerPort;
+			if (pClient->GetPeerName(peerName, peerPort)) {
+				CString msg;
+				msg.Format(L"%s:%u", peerName, peerPort);
+				int choice = MessageBoxW(msg, L"Server", MB_YESNO);
+				if (choice == IDYES)
+					NewWindow(pClient);
+			}
+		}
+	}
 }
 
-
+void CServerDlg::NewWindow(CServerSocket* pClient) {
+	/* TODO: Create a new Window with the following
+	* CMD: To send command and recv output, error
+	* DOWNL: To Download file from client
+	* UPL: To Upload file to client
+	*/
+	AfxMessageBox(L"NIGGA", MB_YESNOCANCEL);
+}
