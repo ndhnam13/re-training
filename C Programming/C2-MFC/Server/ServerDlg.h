@@ -21,7 +21,6 @@ public:
 	protected:
 	virtual void DoDataExchange(CDataExchange* pDX);	// DDX/DDV support
 
-
 // Implementation
 protected:
 	HICON m_hIcon;
@@ -32,6 +31,7 @@ protected:
 	afx_msg void OnPaint();
 	afx_msg HCURSOR OnQueryDragIcon();
 	DECLARE_MESSAGE_MAP()
+	virtual BOOL PreTranslateMessage(MSG* pMsg);
 public:
 	afx_msg void OnBnClickedButton1();
 	afx_msg void OnBnClickedButtonListen();
@@ -46,4 +46,5 @@ private:
 	CServerSocket m_ServerSocket;
 	CListBox m_ClientBox;
 	BOOL listenState = FALSE;
+	MSG* pMsg;
 };

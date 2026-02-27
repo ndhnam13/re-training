@@ -6,6 +6,7 @@
 #include "framework.h"
 #include "Server.h"
 #include "ServerDlg.h"
+#include "ClientDlg.h"
 #include "afxdialogex.h"
 
 #ifdef _DEBUG
@@ -141,6 +142,18 @@ HCURSOR CServerDlg::OnQueryDragIcon()
 	return static_cast<HCURSOR>(m_hIcon);
 }
 
+// Avoid closing the window when pressing Enter or Escape
+BOOL CServerDlg::PreTranslateMessage(MSG* pMsg) {
+	//Only get WM_KEYDOWN message at the Dialog window
+	if (pMsg->hwnd == this->m_hWnd && pMsg->message == WM_KEYDOWN) 
+	{
+		if (pMsg->wParam == VK_RETURN || pMsg->wParam == VK_ESCAPE)
+		{
+			return TRUE;                // Do not process further
+		}
+	}
+	return CWnd::PreTranslateMessage(pMsg);
+}
 
 // Handling UI Logic
 void CServerDlg::OnBnClickedButton1() {
@@ -226,10 +239,8 @@ void CServerDlg::OnLbnSelchangeList1() {
 }
 
 void CServerDlg::NewWindow(CServerSocket* pClient) {
-	/* TODO: Create a new Window with the following
-	* CMD: To send command and recv output, error
-	* DOWNL: To Download file from client
-	* UPL: To Upload file to client
-	*/
-	AfxMessageBox(L"NIGGA", MB_YESNOCANCEL);
+	// TODO: Create a new Window with buttons to control selected client
+	
+	CClientDlg cDlg(pClient, this);
+	cDlg.DoModal();
 }
