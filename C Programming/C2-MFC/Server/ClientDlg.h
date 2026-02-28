@@ -2,7 +2,9 @@
 #include <vector>
 #include "afxdialogex.h"
 #include "ServerSocket.h"
-
+#define RUNCMD 1
+#define DOWNLOAD 2
+#define UPLOAD 3
 // CClientDlg dialog
 
 class CClientDlg : public CDialogEx

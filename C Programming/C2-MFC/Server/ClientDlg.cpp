@@ -123,7 +123,7 @@ BOOL CClientDlg::PreTranslateMessage(MSG* pMsg) {
 void CClientDlg::OnBnClickedButtonRuncmd()
 {
 	/* TODO: Get input from input edit control box
-	* Prepend input with "CMD"
+	* Prepend input with opCode and size
 	* Send/Recv
 	* Print output into output edit control box
 	*/
@@ -132,19 +132,21 @@ void CClientDlg::OnBnClickedButtonRuncmd()
 	if (GetDlgItemText(IDC_EDIT_CMDINPUT, cmdLine)) {
 		SetDlgItemText(IDC_EDIT_CMDOUTPUT, L"");
 
-		//Prepending cmdLine with CMD prefix then send to client
-		CString fullCmd;
-		fullCmd = L"CMD" + cmdLine;
-		int fullCmdLen = (fullCmd.GetLength() + 1) * sizeof(wchar_t);
-
+		//Prepending cmdLine with 4 bytes opCode and 4 bytes of size
+		int cmdLineLen = (cmdLine.GetLength() + 1) * sizeof(wchar_t);
+		int opCode = RUNCMD;
+		std::vector<byte> sendBuffer(sizeof(int)*2 + cmdLineLen);
+		memcpy(sendBuffer.data(), &opCode, sizeof(int));
+		memcpy(sendBuffer.data() + sizeof(int), &cmdLineLen, sizeof(int));
+		memcpy(sendBuffer.data() + sizeof(int) * 2, cmdLine, cmdLineLen);
 		// Send to client
-		if (m_pClient->Send(fullCmd.GetBuffer(), fullCmdLen, 0) != SOCKET_ERROR) {
+		if (m_pClient->Send(sendBuffer.data(), (int)sendBuffer.size(), 0) != SOCKET_ERROR) {
 			// Recv from client
 			int expectedSize = 0;
 			// Get first 4 bytes (size)
 			if (m_pClient->Receive(&expectedSize, sizeof(int)) > 0) {
 				// Allocate buffer 
-				std::vector<wchar_t> outputBuffer(expectedSize / sizeof(wchar_t) + 1, 0);
+				std::vector<wchar_t> outputBuffer(expectedSize / sizeof(wchar_t) + 1);
 				// Get the recv bytes
 				int received = 0;
 				while (received < expectedSize) {
