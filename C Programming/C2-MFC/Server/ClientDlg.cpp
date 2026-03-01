@@ -140,19 +140,20 @@ void CClientDlg::OnBnClickedButtonRuncmd()
 		memcpy(sendBuffer.data() + sizeof(int), &cmdLineLen, sizeof(int));
 		memcpy(sendBuffer.data() + sizeof(int) * 2, cmdLine, cmdLineLen);
 		// Send to client
-		if (m_pClient->Send(sendBuffer.data(), (int)sendBuffer.size(), 0) != SOCKET_ERROR) {
+		if (m_pClient->Send(sendBuffer.data(), sendBuffer.size(), 0) != SOCKET_ERROR) {
 			// Recv from client
 			int expectedSize = 0;
 			// Get first 4 bytes (size)
-			if (m_pClient->Receive(&expectedSize, sizeof(int)) > 0) {
+			Sleep(50); // Sleep a bit before recv or it doesnt recv all bytes, i really dont know why 
+			if (m_pClient->Receive(&expectedSize, sizeof(int)) == 4) {
 				// Allocate buffer 
-				std::vector<wchar_t> outputBuffer(expectedSize / sizeof(wchar_t) + 1);
+				std::vector<char> outputBuffer(expectedSize + 1, 0);
 				// Get the recv bytes
 				int received = 0;
 				while (received < expectedSize) {
-					received += m_pClient->Receive(outputBuffer.data() + (received / sizeof(wchar_t)), expectedSize - received);
+					received += m_pClient->Receive(outputBuffer.data() + received, expectedSize - received);
 				}
-				SetDlgItemText(IDC_EDIT_CMDOUTPUT, outputBuffer.data());
+				SetDlgItemTextA(this->m_hWnd, IDC_EDIT_CMDOUTPUT, outputBuffer.data());
 				SetDlgItemText(IDC_EDIT_CMDINPUT, L"");
 			} 
 			else SetDlgItemText(IDC_EDIT_CMDOUTPUT, L"No resp from client");
