@@ -5,6 +5,7 @@
 #define RUNCMD 1
 #define DOWNLOAD 2
 #define UPLOAD 3
+#define CLOSE 4
 // CClientDlg dialog
 
 class CClientDlg : public CDialogEx

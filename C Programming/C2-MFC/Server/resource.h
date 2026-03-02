@@ -16,6 +16,11 @@
 #define IDC_EDIT_CMDINPUT               1011
 #define IDC_EDIT_CMDOUTPUT              1012
 #define IDC_BUTTON_RUNCMD               1013
+#define IDC_BUTTON_DOWNLOAD             1014
+#define IDC_BUTTON_UPLOAD               1015
+#define IDC_EDIT_FILEDOWNLOAD           1016
+#define IDC_EDIT3                       1018
+#define IDC_EDIT_SAVENAME               1018
 
 // Next default values for new objects
 // 
@@ -23,7 +28,7 @@
 #ifndef APSTUDIO_READONLY_SYMBOLS
 #define _APS_NEXT_RESOURCE_VALUE        132
 #define _APS_NEXT_COMMAND_VALUE         32771
-#define _APS_NEXT_CONTROL_VALUE         1014
+#define _APS_NEXT_CONTROL_VALUE         1019
 #define _APS_NEXT_SYMED_VALUE           101
 #endif
 #endif
