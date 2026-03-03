@@ -21,6 +21,10 @@
 #define IDC_EDIT_FILEDOWNLOAD           1016
 #define IDC_EDIT3                       1018
 #define IDC_EDIT_SAVENAME               1018
+#define IDC_BUTTON_CLOSE                1019
+#define IDC_BUTTON_CHOOSEFILE           1020
+#define IDC_EDIT_FILELOC                1021
+#define IDC_EDIT_UPLOADLOC              1022
 
 // Next default values for new objects
 // 
@@ -28,7 +32,7 @@
 #ifndef APSTUDIO_READONLY_SYMBOLS
 #define _APS_NEXT_RESOURCE_VALUE        132
 #define _APS_NEXT_COMMAND_VALUE         32771
-#define _APS_NEXT_CONTROL_VALUE         1019
+#define _APS_NEXT_CONTROL_VALUE         1023
 #define _APS_NEXT_SYMED_VALUE           101
 #endif
 #endif

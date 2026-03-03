@@ -42,4 +42,7 @@ public:
 private:
 	MSG* pMsg;
 	CServerSocket* m_pClient;	
+public:
+	afx_msg void OnBnClickedButtonClose();
+	afx_msg void OnBnClickedButtonChoosefile();
 };

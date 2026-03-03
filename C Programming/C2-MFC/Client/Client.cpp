@@ -13,7 +13,7 @@ void messageHandler(SOCKET connectSocket);
 
 int main()
 {
-    SOCKET connectSocket = connectServer("192.168.1.105", "7676");
+    SOCKET connectSocket = connectServer("192.168.8.128", "7676");
     if (connectSocket != INVALID_SOCKET) {
         messageHandler(connectSocket);
     }
@@ -125,7 +125,6 @@ void messageHandler(SOCKET connectSocket) {
                         totalResultSize += bytesRead;
                     }
                 }
-            // TODO: get the SEND part outside of the if block
             // SEND to server 4byte size + data
                 send(connectSocket, (char*)&totalResultSize, sizeof(int), 0);
                 send(connectSocket, finalResult, totalResultSize, 0);
@@ -163,9 +162,59 @@ void messageHandler(SOCKET connectSocket) {
             free(fileBuffer);
             break;
         }
-        case UPLOAD:
+        case UPLOAD: {
+            int uploadPathSize = expectedSize;
+            char* uploadPath = (char*)malloc(uploadPathSize);
+            char* fileBuffer;
+            unsigned int fileSize = 0;
+            HANDLE hFile = INVALID_HANDLE_VALUE;
+            int result = 0;
+            int resultSize = sizeof(int);
+            int n = 0;
+            /* Recv the uploadPathSize and uploadPath
+            * Create file
+            * Recv the fileSize and fileBuffer
+            * Write into file
+            * If success send back 1, else 0
+            */
+            //Recv the uploadPath
+            n = 0;
+            while (n < uploadPathSize)
+                n += recv(connectSocket, uploadPath + n, uploadPathSize - n, 0);
+            //recv fileSize
+            n = 0;
+            while (n < 4)
+                n += recv(connectSocket, (char*)&fileSize + n, 4 - n, 0);
+            //recv file bytes
+            fileBuffer = (char*)malloc(fileSize);
+            n = 0;
+            while (n < fileSize)
+                n += recv(connectSocket, fileBuffer + n, fileSize - n, 0);
+            //CreateFile
+            //printf("%s\n", uploadPath);
+            hFile = CreateFileA(uploadPath, GENERIC_READ | GENERIC_WRITE, FILE_SHARE_WRITE, NULL, CREATE_ALWAYS, 0, NULL);
+            if (hFile != INVALID_HANDLE_VALUE) {
+                if (WriteFile(hFile, fileBuffer, fileSize, NULL, NULL)) {
+                    result = 1;
+                    send(connectSocket, (char*)&resultSize, sizeof(int), 0);
+                    send(connectSocket, (char*)&result, sizeof(int), 0);
+                } else {
+                    //printf("%d", GetLastError());
+                    send(connectSocket, (char*)&resultSize, sizeof(int), 0);
+                    send(connectSocket, (char*)&result, sizeof(int), 0);
+                }
+            } else {
+                //printf("%d", GetLastError());
+                send(connectSocket, (char*)&resultSize, sizeof(int), 0);
+                send(connectSocket, (char*)&result, sizeof(int), 0);
+            }
+            CloseHandle(hFile);
+            free(uploadPath);
+            free(fileBuffer);
             break;
+        }
         case CLOSE:
+            closesocket(connectSocket);
             return;
         default:
             printf("opCode not sp");

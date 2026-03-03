@@ -32,6 +32,8 @@ BEGIN_MESSAGE_MAP(CClientDlg, CDialogEx)
 	ON_BN_CLICKED(IDC_BUTTON_DOWNLOAD, &CClientDlg::OnBnDownload)
 	ON_BN_CLICKED(IDC_BUTTON_UPLOAD, &CClientDlg::OnBnUpload)
 	ON_BN_CLICKED(IDC_BUTTON_RUNCMD, &CClientDlg::OnBnClickedButtonRuncmd)
+	ON_BN_CLICKED(IDC_BUTTON_CLOSE, &CClientDlg::OnBnClickedButtonClose)
+	ON_BN_CLICKED(IDC_BUTTON_CHOOSEFILE, &CClientDlg::OnBnClickedButtonChoosefile)
 END_MESSAGE_MAP()
 
 
@@ -122,7 +124,7 @@ BOOL CClientDlg::PreTranslateMessage(MSG* pMsg) {
 //Button and control handler
 void CClientDlg::OnBnClickedButtonRuncmd()
 {
-	/* TODO: Get input from input edit control box
+	/* Get input from input edit control box
 	* Prepend input with opCode and size
 	* Send/Recv
 	* Print output into output edit control box
@@ -230,6 +232,11 @@ void CClientDlg::OnBnDownload()
 					if (!WriteFile(hFile, fileBuffer.data(), fileBuffer.size(), NULL, NULL)) {
 						AfxMessageBox(L"Cant write file");
 					}
+					else {
+						char msg[MAX_PATH];
+						sprintf_s(msg, "File saved to %s", saveLocation);
+						MessageBoxA(NULL, msg, "Server", MB_OK | MB_ICONINFORMATION);
+					}
 				}
 				CloseHandle(hFile);
 			}
@@ -239,9 +246,102 @@ void CClientDlg::OnBnDownload()
 	else AfxMessageBox(L"Type smth");
 }
 
-void CClientDlg::OnBnUpload()
+void CClientDlg::OnBnClickedButtonChoosefile()
 {
-	// TODO: Add your control notification handler code here
+	// Open a file dialog then get the path
+	CFileDialog fileDlg(TRUE, NULL, NULL, OFN_HIDEREADONLY | OFN_OVERWRITEPROMPT,
+		_T("Text Files (*.txt)|*.txt|All Files (*.*)|*.*||"), this);
+
+	if (fileDlg.DoModal() == IDOK) {
+		CStringA filePath;
+		filePath = fileDlg.GetPathName();
+		SetDlgItemTextA(this->m_hWnd, IDC_EDIT_FILELOC, filePath);
+	}
 }
 
+void CClientDlg::OnBnUpload()
+{
+	/* Get the path from IDC_EDIT_FILELOC, get save location from IDC_EDIT_UPLOADLOC
+	* Get uploadPath and size
+	* Get file size, Open+Read the path into a buffer
+	* BUILD UPLOAD PACKET
+	[4b opCode] [4b uploadPath size] [uploadPath] [4b fileSize] [file bytes]
+	* Send to client
+	* Recv from client, if 1 => success, if 0 => failed
+	*/
 
+	char filePath[MAX_PATH+1];
+	char uploadPath[MAX_PATH+1];
+	int uploadPathSize = 0;
+	int opCode = UPLOAD;
+	HANDLE hFile;
+	LARGE_INTEGER largeInt;
+	unsigned int fileSize = 0;
+	char* fileBuffer;
+	int recved = 0;
+	int received = 0;
+	int expectedSize = 0;
+	int uploadResult = 0;
+	GetDlgItemTextA(this->m_hWnd, IDC_EDIT_FILELOC, filePath, MAX_PATH+1);
+	//Get size and uploadPath
+	GetDlgItemTextA(this->m_hWnd, IDC_EDIT_UPLOADLOC, uploadPath, MAX_PATH+1);
+	uploadPathSize = strlen(uploadPath) + 1;
+	//Get size, read file into fileBuffer
+	hFile = CreateFileA(filePath, GENERIC_READ | GENERIC_WRITE, FILE_SHARE_READ, NULL, OPEN_EXISTING, 0, NULL);
+	GetFileSizeEx(hFile, &largeInt);
+	fileSize = largeInt.QuadPart;
+	fileBuffer = (char*)malloc(fileSize);
+	ReadFile(hFile, fileBuffer, fileSize, NULL, NULL);
+	CloseHandle(hFile);
+	// [4b opCode] [4b uploadPath size] [uploadPath] [4b fileSize] [file bytes]
+	std::vector <byte> sendBuffer(sizeof(int) * 2 + uploadPathSize + sizeof(int) + fileSize);
+	memcpy(sendBuffer.data(), &opCode, sizeof(int));
+	memcpy(sendBuffer.data() + sizeof(int), &uploadPathSize, sizeof(int));
+	memcpy(sendBuffer.data() + sizeof(int)*2, uploadPath, uploadPathSize);
+	memcpy(sendBuffer.data() + sizeof(int)*2 + uploadPathSize, &fileSize, sizeof(int));
+	memcpy(sendBuffer.data() + sizeof(int) * 2 + uploadPathSize + sizeof(int), fileBuffer, fileSize);
+
+	//Send to client
+	if (m_pClient->Send(sendBuffer.data(), sendBuffer.size(), 0) != SOCKET_ERROR) {
+		//Recv from client
+		// recv 4b size
+		while (recved < 4) {
+			int ret = m_pClient->Receive((char*)&expectedSize, sizeof(int), 0);
+			if (ret == SOCKET_ERROR) {
+				if (GetLastError() == WSAEWOULDBLOCK) {
+					Sleep(10);
+					continue;
+				}
+			}
+			if (ret == 0) break;
+			recved += ret;
+		}
+		// recv message 1 for success and 0 for failed
+		while (received < expectedSize)
+			received += m_pClient->Receive((char*)&uploadResult + received, expectedSize - received);
+
+		if (uploadResult == 1)
+			AfxMessageBox(L"File upload succeded");
+		//TODO: Add more verbos error alert
+		else {
+			AfxMessageBox(L"File upload failed");
+		}
+	} //TODO: Add more verbos error alert
+	else {
+		AfxMessageBox(L"Send to client Failed");
+	}
+}
+
+void CClientDlg::OnBnClickedButtonClose()
+{
+	int opCode = CLOSE;
+	int msgLen = 0;
+	std::vector <byte> sendBuffer(sizeof(int) * 2);
+	memcpy(sendBuffer.data(), &opCode, sizeof(int));
+	memcpy(sendBuffer.data() + sizeof(int), &msgLen, sizeof(int));
+	//Send Close message to client then close the window
+	if (m_pClient->Send(sendBuffer.data(), sendBuffer.size(), 0) != SOCKET_ERROR) {
+		AfxMessageBox(L"Closed connection to client");
+		EndDialog(0);
+	}
+}

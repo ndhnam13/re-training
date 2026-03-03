@@ -47,6 +47,7 @@ void CServerSocket::OnAccept(int nErrorCode) {
 	CAsyncSocket::OnAccept(nErrorCode);
 }
 
+// Called when client closed connection to server
 void CServerSocket::OnClose(int nErrorCode) {
 	CString peerName;
 	UINT peerPort;
