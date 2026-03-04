@@ -173,7 +173,11 @@ void CClientDlg::OnBnClickedButtonRuncmd()
 			} 
 			else SetDlgItemText(IDC_EDIT_CMDOUTPUT, L"No resp from client");
 		}
-		else AfxMessageBox(L"Send Failed");
+		else {
+			char msg[50];
+			sprintf_s(msg, "Send to client failed\nError: %d", GetLastError());
+			MessageBoxA(NULL, msg, "Server", MB_OK | MB_ICONERROR);
+		}
 	}
 	else AfxMessageBox(L"Type Smth");
 }
@@ -230,7 +234,9 @@ void CClientDlg::OnBnDownload()
 				}
 				else {
 					if (!WriteFile(hFile, fileBuffer.data(), fileBuffer.size(), NULL, NULL)) {
-						AfxMessageBox(L"Cant write file");
+						char msg[50];
+						sprintf_s(msg, "Cant write file\nError: %d", GetLastError());
+						MessageBoxA(NULL, msg, "Server", MB_OK | MB_ICONERROR);
 					}
 					else {
 						char msg[MAX_PATH];
@@ -322,13 +328,15 @@ void CClientDlg::OnBnUpload()
 
 		if (uploadResult == 1)
 			AfxMessageBox(L"File upload succeded");
-		//TODO: Add more verbos error alert
 		else {
-			AfxMessageBox(L"File upload failed");
+			char msg[50];
+			sprintf_s(msg, "File upload failed\nError: %d", uploadResult);
+			MessageBoxA(NULL, msg, "Server", MB_OK | MB_ICONERROR);
 		}
-	} //TODO: Add more verbos error alert
-	else {
-		AfxMessageBox(L"Send to client Failed");
+	} else {
+		char msg[50];
+		sprintf_s(msg, "Send to client failed\nError: %d", GetLastError());
+		MessageBoxA(NULL, msg, "Server", MB_OK | MB_ICONERROR);
 	}
 }
 
@@ -343,5 +351,10 @@ void CClientDlg::OnBnClickedButtonClose()
 	if (m_pClient->Send(sendBuffer.data(), sendBuffer.size(), 0) != SOCKET_ERROR) {
 		AfxMessageBox(L"Closed connection to client");
 		EndDialog(0);
+	}
+	else {
+		char msg[50];
+		sprintf_s(msg, "Send to client failed\nError: %d", GetLastError());
+		MessageBoxA(NULL, msg, "Server", MB_OK | MB_ICONERROR);
 	}
 }
