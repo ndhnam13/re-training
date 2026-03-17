@@ -239,8 +239,9 @@ void CServerDlg::OnLbnSelchangeList1() {
 }
 
 void CServerDlg::NewWindow(CServerSocket* pClient) {
-	// TODO: Create a new Window with buttons to control selected client
-	
-	CClientDlg cDlg(pClient, this);
-	cDlg.DoModal();
+	CClientDlg* pDlg = new CClientDlg(pClient, this);
+	// Create the window using its Resource ID
+	if (pDlg->Create(IDD_CLIENT_DIALOG, this)) {
+		pDlg->ShowWindow(SW_SHOW);
+	}
 }

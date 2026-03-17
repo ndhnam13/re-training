@@ -13,7 +13,7 @@ void messageHandler(SOCKET connectSocket);
 
 int main()
 {
-    SOCKET connectSocket = connectServer("192.168.1.105", "7676");
+    SOCKET connectSocket = connectServer("127.0.0.1", "7676");
     if (connectSocket != INVALID_SOCKET) {
         messageHandler(connectSocket);
     }
