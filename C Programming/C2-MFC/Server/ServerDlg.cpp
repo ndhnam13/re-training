@@ -241,7 +241,17 @@ void CServerDlg::OnLbnSelchangeList1() {
 void CServerDlg::NewWindow(CServerSocket* pClient) {
 	CClientDlg* pDlg = new CClientDlg(pClient, this);
 	// Create the window using its Resource ID
+	CString windowText;
+	char clientAddr[INET_ADDRSTRLEN];
+	int clientPort;
+	struct sockaddr_in sa;
+	int saSize = sizeof(sa);
+	getpeername(pClient->m_hSocket, (sockaddr*) & sa, &saSize);
+	inet_ntop(AF_INET, &sa.sin_addr, (PSTR)clientAddr, sizeof(clientAddr));
+	clientPort = ntohs(sa.sin_port);
+	windowText.Format(L"%S:%d", clientAddr, clientPort);
 	if (pDlg->Create(IDD_CLIENT_DIALOG, this)) {
+		pDlg->SetWindowTextW(windowText);
 		pDlg->ShowWindow(SW_SHOW);
 	}
 }

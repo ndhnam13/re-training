@@ -2,6 +2,7 @@
 #include <vector>
 #include "afxdialogex.h"
 #include "ServerSocket.h"
+#include <mutex>
 #define RUNCMD 1
 #define DOWNLOAD 2
 #define UPLOAD 3
@@ -41,7 +42,8 @@ public:
 	afx_msg void OnBnUpload();
 private:
 	MSG* pMsg;
-	CServerSocket* m_pClient;	
+	CServerSocket* m_pClient;
+	std::mutex m_socketMutex;
 public:
 	afx_msg void OnBnClickedButtonClose();
 	afx_msg void OnBnClickedButtonChoosefile();

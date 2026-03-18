@@ -187,9 +187,21 @@ void CServerDlg::NewWindow(CServerSocket* pClient) {
 
 ```c++
 void CServerDlg::NewWindow(CServerSocket* pClient) {
-	// Create a new Window with buttons to control selected client
-	CClientDlg cDlg(pClient, this);
-	cDlg.DoModal();
+	CClientDlg* pDlg = new CClientDlg(pClient, this);
+	// Create the window using its Resource ID
+	CString windowText;
+	char clientAddr[INET_ADDRSTRLEN];
+	int clientPort;
+	struct sockaddr_in sa;
+	int saSize = sizeof(sa);
+	getpeername(pClient->m_hSocket, (sockaddr*) & sa, &saSize);
+	inet_ntop(AF_INET, &sa.sin_addr, (PSTR)clientAddr, sizeof(clientAddr));
+	clientPort = ntohs(sa.sin_port);
+	windowText.Format(L"%S:%d", clientAddr, clientPort);
+	if (pDlg->Create(IDD_CLIENT_DIALOG, this)) {
+		pDlg->SetWindowTextW(windowText);
+		pDlg->ShowWindow(SW_SHOW);
+	}
 }
 ```
 
@@ -202,9 +214,9 @@ void CServerDlg::NewWindow(CServerSocket* pClient) {
 #define CLOSE 4
 ```
 
-### Lưu ý khi sử dụng CAsyncSocket::Receive()
+### Khi recv từ client
 
-Theo tài liệu trên [MSDN](https://learn.microsoft.com/en-us/cpp/mfc/windows-sockets-blocking?view=msvc-170) thì  `CAsyncSocket::Receive()` là non-blocking call. Tức là nếu client mất nhiều thời gian để chạy một lệnh trước khi trả kết quả về server (Ví dụ như chạy lệnh `ping` hoặc `tasklist`) thì khi gọi `CAsyncSocket::Receive()` sẽ trả về `-1` với mã lỗi [WSAEWOULDBLOCK](https://learn.microsoft.com/en-us/windows/win32/winsock/windows-sockets-error-codes-2)(Resource temporarily unavailable) khi gặp mã lỗi đó thì chỉ cần `Sleep()` thêm một chút rồi `CAsyncSocket::Receive()` lại cho đến khi không gặp mã lỗi đó nữa
+Nếu client mất nhiều thời gian để chạy một lệnh trước khi trả kết quả về server (Ví dụ như chạy lệnh `ping` hoặc `tasklist` `systeminfo`) thì khi vừa gọi `CAsyncSocket::Receive() hoặc recv()` sẽ trả về `-1` với mã lỗi [WSAEWOULDBLOCK](https://learn.microsoft.com/en-us/windows/win32/winsock/windows-sockets-error-codes-2)(Resource temporarily unavailable) khi gặp mã lỗi đó thì chỉ cần `Sleep()` thêm một chút rồi `CAsyncSocket::Receive() hoặc recv()` lại, nếu gặp các mã lỗi khác thì thông báo cho người dùng
 
 Dưới đây là cách xử lí
 
@@ -223,6 +235,75 @@ while (recved < sizeof(int)) {
 }
 ```
 
+### Xử lí đa luồng
+
+Để có thể điều khiển nhiều client cùng một lúc thì mỗi khi nhấn một nút điều khiển (RunCmd, Download, Upload) cần tạo ra một thread mới để thực hiện nó. Để tạo một thread mới ta sẽ sử dụng [CreateThread()](https://learn.microsoft.com/en-us/windows/win32/api/processthreadsapi/nf-processthreadsapi-createthread)
+
+```c++
+HANDLE CreateThread(
+  [in, optional]  LPSECURITY_ATTRIBUTES   lpThreadAttributes,
+  [in]            SIZE_T                  dwStackSize,
+  [in]            LPTHREAD_START_ROUTINE  lpStartAddress,
+  [in, optional]  __drv_aliasesMem LPVOID lpParameter,
+  [in]            DWORD                   dwCreationFlags,
+  [out, optional] LPDWORD                 lpThreadId
+);
+```
+
+`lpStartAddress` sẽ là hàm để xử lí lệnh gửi đi, nhận về. `lpParameter` sẽ là một struct chứa các tham số mà hàm `lpStartAddress` cần sử dụng
+
+Để quản lý việc giao tiếp, mỗi thread sẽ sử dụng một mutex để thực hiện lock và unlock. Việc này đảm bảo tại một thời điểm chỉ có duy nhất 1 tthread được phép truy cập và sử dụng socket để send/recv
+
+Cơ chế này chặn việc bị nhiễu dữ liệu khi Server gửi liên tiếp nhiều yêu cầu (ví dụ: vừa RunCmd vừa Download). Các thread được tạo sau sẽ vào trạng thái chờ cho đến khi thread trước đó xử lí xong và unlock mutex, response của client luôn được nhận đầy đủ và chính xác vào đúng thread tương ứng
+
+```c++
+struct runCmdParams {
+	HWND hDlg;
+	HWND hBtn;
+	SOCKET hSocket;
+	CString cmdLine;
+	std::mutex* pMutex;
+};
+
+void CClientDlg::OnBnDownload()
+{
+	HWND hBtn = ::GetDlgItem(this->m_hWnd, IDC_BUTTON_DOWNLOAD);
+	::EnableWindow(hBtn, FALSE);
+	char filePath[MAX_PATH] = { 0 };
+	char fileName[MAX_PATH] = { 0 };
+	if (GetDlgItemTextA(this->m_hWnd, IDC_EDIT_FILEDOWNLOAD, filePath, MAX_PATH) > 0 && GetDlgItemTextA(this->m_hWnd, IDC_EDIT_SAVENAME, fileName, MAX_PATH) > 0) {
+		downloadParams* lpParameter = new downloadParams;
+		lpParameter->hDlg = this->m_hWnd;
+		lpParameter->hSocket = m_pClient->m_hSocket;
+		lpParameter->hBtn = hBtn;
+		strcpy_s(lpParameter->filePath, filePath);
+		strcpy_s(lpParameter->fileName, fileName);
+		lpParameter->pMutex = &m_socketMutex;
+		CreateThread(NULL, 0, downloadThread, lpParameter, 0, NULL);
+	}
+	else {
+		AfxMessageBox(L"Type Smth");
+		::EnableWindow(hBtn, TRUE);
+	}
+}
+
+DWORD runCmdThread(LPVOID lpParams) {
+	runCmdParams* pParams = (runCmdParams*)lpParams;
+	HWND hDlg = pParams->hDlg;
+	HWND hBtn = pParams->hBtn;
+	SOCKET hSocket = pParams->hSocket;
+	CString cmdLine = pParams->cmdLine;
+	std::mutex* pMutex = pParams->pMutex;
+
+	pMutex->lock();
+    //.........//
+    pMutex->unlock();
+    EnableWindow(hBtn, TRUE);
+	delete pParams;
+    return 0;
+}
+```
+
 
 
 ### a.) RUNCMD
@@ -236,13 +317,13 @@ Khi có cửa sổ mới ta sẽ tạo thêm một số button, edit control box
 Packet format:
 
 - **Server -> Client: [4b opCode] [4b Size] [cmd]**
-- **Client -> Server: [4b Size] [output]**
+- **Client -> Server: [4b opCode] [4b Size] [output]**
 
 Đối với Server: Để gửi thì khá đơn giản, ta chỉ cần dùng hàm `Send()` lấy buffer của input và size. Nhưng đối với hàm `Recv()` do chưa biết được size của output là như nào, ta sẽ phải làm cách khác:
 
 - Ở client, output gửi về sẽ prepend thêm 4 byte opcode và 4 byte size
 
-- Ở server: Trước hết recv 4 byte đó, rồi allocate 1 buffer với size đó. Sau đó tiếp tục recv cho đến khi nhận đủ size vào buffer, print buffer vào edit control box
+- Ở server: Recv 4 byte đầu, nếu đúng opCode mới đi tiếp, recv 4 byte size, rồi allocate 1 buffer với size đó. Sau đó tiếp tục recv cho đến khi nhận đủ size vào buffer, print buffer vào edit control box
 
 Đối với Client: recv 8 byte và lưu lại opCode, expectedSize. Sau đó tuỳ vào opCode sẽ xử lí
 
@@ -305,7 +386,7 @@ Các dialog control sử dụng
 Packet format:
 
 - **Server -> Client: [4b opCode] [4b Size] [filePath]**
-- **Client -> Server: [4b Size] [fileData]**
+- **Client -> Server: [4b opCode] [4b Size] [fileData]**
 
 Đối với Server:
 
@@ -331,7 +412,7 @@ Các dialog control sử dụng:
 Packet format:
 
 - **Server -> Client: [4b opCode] [4b uploadPathSize] [4b uploadPath] [4b fileSize] [4b fileData]**
-- **Client -> Server: [4b size] [4b result]**
+- **Client -> Server: [4b opCode] [4b size] [4b result]**
 
 Đối với Server:
 

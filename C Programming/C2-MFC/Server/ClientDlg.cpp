@@ -121,35 +121,75 @@ BOOL CClientDlg::PreTranslateMessage(MSG* pMsg) {
 	return CWnd::PreTranslateMessage(pMsg);
 }
 
-//Button and control handler
-void CClientDlg::OnBnClickedButtonRuncmd()
-{
-	/* Get input from input edit control box
-	* Prepend input with opCode and size
-	* Send/Recv
-	* Print output into output edit control box
-	*/
+// Callback functions parameters
+struct runCmdParams {
+	HWND hDlg;
+	HWND hBtn;
+	SOCKET hSocket;
 	CString cmdLine;
-	// Get input from edit control box
-	if (GetDlgItemText(IDC_EDIT_CMDINPUT, cmdLine)) {
-		SetDlgItemText(IDC_EDIT_CMDOUTPUT, L"");
+	std::mutex* pMutex;
+};
+struct downloadParams {
+	HWND hDlg;
+	HWND hBtn;
+	SOCKET hSocket;
+	char filePath[MAX_PATH];
+	char fileName[MAX_PATH];
+	std::mutex* pMutex;
+};
+struct uploadParams {
+	HWND hDlg;
+	HWND hBtn;
+	SOCKET hSocket;
+	char filePath[MAX_PATH];
+	char uploadPath[MAX_PATH];
+	std::mutex* pMutex;
+};
 
-		//Prepending cmdLine with 4 bytes opCode and 4 bytes of size
-		int cmdLineLen = (cmdLine.GetLength() + 1) * sizeof(wchar_t);
-		int opCode = RUNCMD;
-		std::vector<byte> sendBuffer(sizeof(int)*2 + cmdLineLen);
-		memcpy(sendBuffer.data(), &opCode, sizeof(int));
-		memcpy(sendBuffer.data() + sizeof(int), &cmdLineLen, sizeof(int));
-		memcpy(sendBuffer.data() + sizeof(int) * 2, cmdLine, cmdLineLen);
-		// Send to client
-		if (m_pClient->Send(sendBuffer.data(), sendBuffer.size(), 0) != SOCKET_ERROR) {
-			int expectedSize = 0;
-			int recved = 0;
-			// Recv from client
-			// Get first 4 bytes (size)
+// Callback functions
+DWORD runCmdThread(LPVOID lpParams) {
+	runCmdParams* pParams = (runCmdParams*)lpParams;
+	HWND hDlg = pParams->hDlg;
+	HWND hBtn = pParams->hBtn;
+	SOCKET hSocket = pParams->hSocket;
+	CString cmdLine = pParams->cmdLine;
+	std::mutex* pMutex = pParams->pMutex;
+
+	pMutex->lock();
+	//Prepending cmdLine with 4 bytes opCode and 4 bytes of size
+	int cmdLineLen = (cmdLine.GetLength() + 1) * sizeof(wchar_t);
+	int opCode = RUNCMD;
+	std::vector<byte> sendBuffer(sizeof(int) * 2 + cmdLineLen);
+	memcpy(sendBuffer.data(), &opCode, sizeof(int));
+	memcpy(sendBuffer.data() + sizeof(int), &cmdLineLen, sizeof(int));
+	memcpy(sendBuffer.data() + sizeof(int) * 2, cmdLine, cmdLineLen);
+	// Send to client
+	if (send(hSocket, (char*)sendBuffer.data(), sendBuffer.size(), 0) != SOCKET_ERROR) {
+		int expectedSize = 0;
+		int recved = 0;
+		// Recv from client
+		// Get first 4 bytes (opCode)
+		int recvOpCode = 0;
+		while (recved < sizeof(int)) {
+			int ret = recv(hSocket, (char*)&recvOpCode + recved, sizeof(int) - recved, 0);
+			if (ret == SOCKET_ERROR) {
+				if (GetLastError() == WSAEWOULDBLOCK) {
+					Sleep(10);
+					continue;
+				}
+				break;
+			}
+			if (ret == 0) break;
+			recved += ret;
+		}
+		// Only continue if returned opCode is RUNCMD
+		if (recvOpCode == opCode) {
+			// Get 4 bytes (size)
 			// If Receive() returns error WSAEWOULDBLOCK, then Sleep() until we get enough data
+			expectedSize = 0;
+			recved = 0;
 			while (recved < 4) {
-				int ret = m_pClient->Receive((char*)&expectedSize + recved, sizeof(int) - recved);
+				int ret = recv(hSocket, (char*)&expectedSize + recved, sizeof(int) - recved, 0);
 				if (ret == SOCKET_ERROR) {
 					if (GetLastError() == WSAEWOULDBLOCK) {
 						Sleep(10);
@@ -166,43 +206,79 @@ void CClientDlg::OnBnClickedButtonRuncmd()
 				// Get the recv bytes
 				int received = 0;
 				while (received < expectedSize) {
-					received += m_pClient->Receive(outputBuffer.data() + received, expectedSize - received);
+					int ret = recv(hSocket, outputBuffer.data() + received, expectedSize - received, 0);
+					if (ret == SOCKET_ERROR) {
+						if (GetLastError() == WSAEWOULDBLOCK) {
+							Sleep(10);
+							continue;
+						}
+						break;
+					}
+					if (ret == 0) break;
+					received += ret;
 				}
-				SetDlgItemTextA(this->m_hWnd, IDC_EDIT_CMDOUTPUT, outputBuffer.data());
-				SetDlgItemText(IDC_EDIT_CMDINPUT, L"");
-			} 
-			else SetDlgItemText(IDC_EDIT_CMDOUTPUT, L"No resp from client");
-		}
-		else {
-			char msg[50];
-			sprintf_s(msg, "Send to client failed\nError: %d", GetLastError());
-			MessageBoxA(NULL, msg, "Server", MB_OK | MB_ICONERROR);
+				SetDlgItemTextA(hDlg, IDC_EDIT_CMDOUTPUT, outputBuffer.data());
+				SetDlgItemTextW(hDlg, IDC_EDIT_CMDINPUT, L"");
+			}
+			else SetDlgItemTextW(hDlg, IDC_EDIT_CMDOUTPUT, L"No resp from client");
 		}
 	}
-	else AfxMessageBox(L"Type Smth");
+	else {
+		char msg[50];
+		sprintf_s(msg, "Send to client failed\nError: %d", GetLastError());
+		MessageBoxA(NULL, msg, "Server", MB_OK | MB_ICONERROR);
+	}
+
+	pMutex->unlock();
+	EnableWindow(hBtn, TRUE);
+	delete pParams;
+	return 0;
 }
 
-void CClientDlg::OnBnDownload()
-{
-	char filePath[MAX_PATH];
-	char fileName[MAX_PATH];
-	if (GetDlgItemTextA(this->m_hWnd, IDC_EDIT_FILEDOWNLOAD, filePath, MAX_PATH) > 0 && GetDlgItemTextA(this->m_hWnd, IDC_EDIT_SAVENAME, fileName, MAX_PATH) > 0) {
-		//Prepend with opCode and size
-		int filePathLen = strlen(filePath) + 1;
-		int opCode = DOWNLOAD;
-		std::vector<byte> sendBuffer(sizeof(int)*2 + filePathLen);
-		memcpy(sendBuffer.data(), &opCode, sizeof(int));
-		memcpy(sendBuffer.data() + sizeof(int), &filePathLen, sizeof(int));
-		memcpy(sendBuffer.data() + sizeof(int)*2, filePath, filePathLen);
-		//Send to client
-		if (m_pClient->Send(sendBuffer.data(), sendBuffer.size(), 0) != SOCKET_ERROR) {
-			unsigned int expectedSize = 0;
-			int recved = 0;
-			//Recv from client
+DWORD downloadThread(LPVOID lpParams) {
+	downloadParams* pParams = (downloadParams*)lpParams;
+	HWND hDlg = pParams->hDlg;
+	HWND hBtn = pParams->hBtn;
+	SOCKET hSocket = pParams->hSocket;
+	char* filePath = pParams->filePath;
+	char* fileName = pParams->fileName;
+	std::mutex* pMutex = pParams->pMutex;
+
+	pMutex->lock();
+	//Prepend with opCode and size
+	int filePathLen = strlen(filePath) + 1;
+	int opCode = DOWNLOAD;
+	std::vector<byte> sendBuffer(sizeof(int) * 2 + filePathLen);
+	memcpy(sendBuffer.data(), &opCode, sizeof(int));
+	memcpy(sendBuffer.data() + sizeof(int), &filePathLen, sizeof(int));
+	memcpy(sendBuffer.data() + sizeof(int) * 2, filePath, filePathLen);
+	//Send to client
+	if (send(hSocket, (char*)sendBuffer.data(), sendBuffer.size(), 0) != SOCKET_ERROR) {
+		unsigned int expectedSize = 0;
+		int recved = 0;
+		//Recv from client
+		// Get 4 bytes opCode
+		int recvOpCode = 0;
+		while (recved < 4) {
+			int ret = recv(hSocket, (char*)&recvOpCode + recved, sizeof(int) - recved, 0);
+			if (ret == SOCKET_ERROR) {
+				if (GetLastError() == WSAEWOULDBLOCK) {
+					Sleep(10);
+					continue;
+				}
+				break;
+			}
+			if (ret == 0) break;
+			recved += ret;
+		}
+		// Only continue if returned opCode is RUNCMD
+		if (recvOpCode == opCode) {
 			// Get 4 bytes size
 			// If Receive() returns error WSAEWOULDBLOCK, then Sleep() until we get enough data
+			expectedSize = 0;
+			recved = 0;
 			while (recved < 4) {
-				int ret = m_pClient->Receive((char*)&expectedSize + recved, sizeof(int) - recved);
+				int ret = recv(hSocket, (char*)&expectedSize + recved, sizeof(int) - recved, 0);
 				if (ret == SOCKET_ERROR) {
 					if (GetLastError() == WSAEWOULDBLOCK) {
 						Sleep(10);
@@ -213,13 +289,22 @@ void CClientDlg::OnBnDownload()
 				if (ret == 0) break;
 				recved += ret;
 			}
-			if ( recved == 4) {
+			if (recved == 4) {
 				//Allocate buffer
 				std::vector<byte> fileBuffer(expectedSize);
 				int recieved = 0;
 				//Recv file bytes into fileBuffer
 				while (recieved < expectedSize) {
-					recieved += m_pClient->Receive(fileBuffer.data() + recieved, expectedSize - recieved);
+					int ret = recv(hSocket, (char*)fileBuffer.data() + recieved, expectedSize - recieved, 0);
+					if (ret == SOCKET_ERROR) {
+						if (GetLastError() == WSAEWOULDBLOCK) {
+							Sleep(10);
+							continue;
+						}
+						break;
+					}
+					if (ret == 0) break;
+					recieved += ret;
 				}
 				//Create folder to save downloaded files
 				CreateDirectoryA(".\\DownloadedFiles\\", NULL);
@@ -247,16 +332,150 @@ void CClientDlg::OnBnDownload()
 				CloseHandle(hFile);
 			}
 		}
-		else AfxMessageBox(L"File download failed");
 	}
-	else AfxMessageBox(L"Type smth");
+	else AfxMessageBox(L"File download failed");
+
+	pMutex->unlock();
+	EnableWindow(hBtn, TRUE);
+	delete pParams;
+	return 0;
+}
+
+DWORD uploadThread(LPVOID lpParams) {
+	uploadParams* pParams = (uploadParams*)lpParams;
+	HWND hDlg = pParams->hDlg;
+	HWND hBtn = pParams->hBtn;
+	SOCKET hSocket = pParams->hSocket;
+	char* filePath = pParams->filePath;
+	char* uploadPath = pParams->uploadPath;
+	std::mutex* pMutex = pParams->pMutex;
+
+	pMutex->lock();
+	int uploadPathSize = strlen(uploadPath);
+	int opCode = UPLOAD;
+	HANDLE hFile = CreateFileA(filePath, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, 0, NULL);
+	if (hFile == INVALID_HANDLE_VALUE) {
+		MessageBoxA(hDlg, "Failed to open local file", "Error", MB_OK);
+		return 1;
+	}
+	LARGE_INTEGER largeInt;
+	GetFileSizeEx(hFile, &largeInt);
+	unsigned int fileSize = largeInt.QuadPart;
+	std::vector<char> fileBuffer(fileSize);
+	DWORD bytesRead = 0;
+	ReadFile(hFile, fileBuffer.data(), fileSize, &bytesRead, NULL);
+	CloseHandle(hFile);
+
+	std::vector <byte> sendBuffer(sizeof(int) * 2 + uploadPathSize + sizeof(int) + fileSize);
+	memcpy(sendBuffer.data(), &opCode, sizeof(int));
+	memcpy(sendBuffer.data() + sizeof(int), &uploadPathSize, sizeof(int));
+	memcpy(sendBuffer.data() + sizeof(int) * 2, uploadPath, uploadPathSize);
+	memcpy(sendBuffer.data() + sizeof(int) * 2 + uploadPathSize, &fileSize, sizeof(int));
+	memcpy(sendBuffer.data() + sizeof(int) * 2 + uploadPathSize + sizeof(int), fileBuffer.data(), fileSize);
+
+	if (send(hSocket, (const char*)sendBuffer.data(), sendBuffer.size(), 0) != SOCKET_ERROR) {
+		int expectedSize = 0;
+		int recved = 0;
+		while (recved < 4) {
+			int ret = recv(hSocket, (char*)&expectedSize + recved, sizeof(int) - recved, 0);
+			if (ret == SOCKET_ERROR) {
+				if (WSAGetLastError() == WSAEWOULDBLOCK) {
+					Sleep(10);
+					continue;
+				}
+				break;
+			}
+			if (ret <= 0) break;
+			recved += ret;
+		}
+
+		int uploadResult = 0;
+		int received = 0;
+		while (received < expectedSize) {
+			int ret = recv(hSocket, (char*)&uploadResult + received, expectedSize - received, 0);
+			if (ret == SOCKET_ERROR) {
+				if (WSAGetLastError() == WSAEWOULDBLOCK) {
+					Sleep(10);
+					continue;
+				}
+				break;
+			}
+			if (ret <= 0) break;
+			received += ret;
+		}
+
+		if (uploadResult == 1)
+			MessageBoxW(hDlg, L"File upload succeded", L"Success", MB_OK);
+		else {
+			char msg[50];
+			sprintf_s(msg, "File upload failed\nError: %d", uploadResult);
+			MessageBoxA(hDlg, msg, "Server", MB_OK | MB_ICONERROR);
+		}
+	}
+	else {
+		char msg[50];
+		sprintf_s(msg, "Send to client failed\nError: %d", WSAGetLastError());
+		MessageBoxA(hDlg, msg, "Server", MB_OK | MB_ICONERROR);
+	}
+
+	pMutex->unlock();
+	EnableWindow(hBtn, TRUE);
+	delete pParams;
+	return 0;
+}
+
+//Button and control handler
+void CClientDlg::OnBnClickedButtonRuncmd()
+{
+	HWND hBtn = ::GetDlgItem(this->m_hWnd, IDC_BUTTON_RUNCMD);
+	::EnableWindow(hBtn, FALSE);
+	/* Get input from input edit control box
+	* Prepend input with opCode and size
+	* Send/Recv
+	* Print output into output edit control box
+	*/
+	CString cmdLine;
+	// Get input from edit control box
+	if (GetDlgItemText(IDC_EDIT_CMDINPUT, cmdLine)) {
+		SetDlgItemText(IDC_EDIT_CMDOUTPUT, L"Running CMD on client...");
+
+		HWND hDlg = this->m_hWnd;
+		SOCKET hSocket = m_pClient->m_hSocket;
+		runCmdParams* lpParameter = new runCmdParams{hDlg, hBtn, hSocket, cmdLine, &m_socketMutex};
+		CreateThread(NULL, 0, runCmdThread, lpParameter, 0, NULL);
+	}
+	else {
+		AfxMessageBox(L"Type Smth");
+		::EnableWindow(hBtn, TRUE);
+	}
+}
+
+void CClientDlg::OnBnDownload()
+{
+	HWND hBtn = ::GetDlgItem(this->m_hWnd, IDC_BUTTON_DOWNLOAD);
+	::EnableWindow(hBtn, FALSE);
+	char filePath[MAX_PATH] = { 0 };
+	char fileName[MAX_PATH] = { 0 };
+	if (GetDlgItemTextA(this->m_hWnd, IDC_EDIT_FILEDOWNLOAD, filePath, MAX_PATH) > 0 && GetDlgItemTextA(this->m_hWnd, IDC_EDIT_SAVENAME, fileName, MAX_PATH) > 0) {
+		downloadParams* lpParameter = new downloadParams;
+		lpParameter->hDlg = this->m_hWnd;
+		lpParameter->hSocket = m_pClient->m_hSocket;
+		lpParameter->hBtn = hBtn;
+		strcpy_s(lpParameter->filePath, filePath);
+		strcpy_s(lpParameter->fileName, fileName);
+		lpParameter->pMutex = &m_socketMutex;
+		CreateThread(NULL, 0, downloadThread, lpParameter, 0, NULL);
+	}
+	else {
+		AfxMessageBox(L"Type Smth");
+		::EnableWindow(hBtn, TRUE);
+	}
 }
 
 void CClientDlg::OnBnClickedButtonChoosefile()
 {
 	// Open a file dialog then get the path
-	CFileDialog fileDlg(TRUE, NULL, NULL, OFN_HIDEREADONLY | OFN_OVERWRITEPROMPT,
-		_T("Text Files (*.txt)|*.txt|All Files (*.*)|*.*||"), this);
+	CFileDialog fileDlg(TRUE, NULL, NULL, 0, L"All Files (*.*)|*.*||", this);
 
 	if (fileDlg.DoModal() == IDOK) {
 		CStringA filePath;
@@ -267,6 +486,8 @@ void CClientDlg::OnBnClickedButtonChoosefile()
 
 void CClientDlg::OnBnUpload()
 {
+	HWND hBtn = ::GetDlgItem(this->m_hWnd, IDC_BUTTON_UPLOAD);
+	::EnableWindow(hBtn, FALSE);
 	/* Get the path from IDC_EDIT_FILELOC, get save location from IDC_EDIT_UPLOADLOC
 	* Get uploadPath and size
 	* Get file size, Open+Read the path into a buffer
@@ -275,68 +496,25 @@ void CClientDlg::OnBnUpload()
 	* Send to client
 	* Recv from client, if 1 => success, if 0 => failed
 	*/
+	char filePath[MAX_PATH] = { 0 };
+	char uploadPath[MAX_PATH] = { 0 };
 
-	char filePath[MAX_PATH+1];
-	char uploadPath[MAX_PATH+1];
-	int uploadPathSize = 0;
-	int opCode = UPLOAD;
-	HANDLE hFile;
-	LARGE_INTEGER largeInt;
-	unsigned int fileSize = 0;
-	char* fileBuffer;
-	int recved = 0;
-	int received = 0;
-	int expectedSize = 0;
-	int uploadResult = 0;
-	GetDlgItemTextA(this->m_hWnd, IDC_EDIT_FILELOC, filePath, MAX_PATH+1);
-	//Get size and uploadPath
-	GetDlgItemTextA(this->m_hWnd, IDC_EDIT_UPLOADLOC, uploadPath, MAX_PATH+1);
-	uploadPathSize = strlen(uploadPath) + 1;
-	//Get size, read file into fileBuffer
-	hFile = CreateFileA(filePath, GENERIC_READ | GENERIC_WRITE, FILE_SHARE_READ, NULL, OPEN_EXISTING, 0, NULL);
-	GetFileSizeEx(hFile, &largeInt);
-	fileSize = largeInt.QuadPart;
-	fileBuffer = (char*)malloc(fileSize);
-	ReadFile(hFile, fileBuffer, fileSize, NULL, NULL);
-	CloseHandle(hFile);
-	// [4b opCode] [4b uploadPath size] [uploadPath] [4b fileSize] [file bytes]
-	std::vector <byte> sendBuffer(sizeof(int) * 2 + uploadPathSize + sizeof(int) + fileSize);
-	memcpy(sendBuffer.data(), &opCode, sizeof(int));
-	memcpy(sendBuffer.data() + sizeof(int), &uploadPathSize, sizeof(int));
-	memcpy(sendBuffer.data() + sizeof(int)*2, uploadPath, uploadPathSize);
-	memcpy(sendBuffer.data() + sizeof(int)*2 + uploadPathSize, &fileSize, sizeof(int));
-	memcpy(sendBuffer.data() + sizeof(int) * 2 + uploadPathSize + sizeof(int), fileBuffer, fileSize);
+	if (GetDlgItemTextA(this->m_hWnd, IDC_EDIT_FILELOC, filePath, MAX_PATH) > 0 &&
+		GetDlgItemTextA(this->m_hWnd, IDC_EDIT_UPLOADLOC, uploadPath, MAX_PATH) > 0) {
 
-	//Send to client
-	if (m_pClient->Send(sendBuffer.data(), sendBuffer.size(), 0) != SOCKET_ERROR) {
-		//Recv from client
-		// recv 4b size
-		while (recved < 4) {
-			int ret = m_pClient->Receive((char*)&expectedSize, sizeof(int), 0);
-			if (ret == SOCKET_ERROR) {
-				if (GetLastError() == WSAEWOULDBLOCK) {
-					Sleep(10);
-					continue;
-				}
-			}
-			if (ret == 0) break;
-			recved += ret;
-		}
-		// recv message 1 for success and 0 for failed
-		while (received < expectedSize)
-			received += m_pClient->Receive((char*)&uploadResult + received, expectedSize - received);
+		uploadParams* lpParameter = new uploadParams;
+		lpParameter->hDlg = this->m_hWnd;
+		lpParameter->hBtn = hBtn;
+		lpParameter->hSocket = m_pClient->m_hSocket;
+		strcpy_s(lpParameter->filePath, filePath);
+		strcpy_s(lpParameter->uploadPath, uploadPath);
+		lpParameter->pMutex = &m_socketMutex;
 
-		if (uploadResult == 1)
-			AfxMessageBox(L"File upload succeded");
-		else {
-			char msg[50];
-			sprintf_s(msg, "File upload failed\nError: %d", uploadResult);
-			MessageBoxA(NULL, msg, "Server", MB_OK | MB_ICONERROR);
-		}
-	} else {
-		char msg[50];
-		sprintf_s(msg, "Send to client failed\nError: %d", GetLastError());
-		MessageBoxA(NULL, msg, "Server", MB_OK | MB_ICONERROR);
+		CreateThread(NULL, 0, uploadThread, lpParameter, 0, NULL);
+	}
+	else {
+		AfxMessageBox(L"Type Smth");
+		::EnableWindow(hBtn, TRUE);
 	}
 }
 

@@ -125,7 +125,8 @@ void messageHandler(SOCKET connectSocket) {
                         totalResultSize += bytesRead;
                     }
                 }
-            // SEND to server 4byte size + data
+            // SEND Client -> Server: [4b opCode] [4b Size] [output]
+                send(connectSocket, (char*)&opCode, sizeof(int), 0);
                 send(connectSocket, (char*)&totalResultSize, sizeof(int), 0);
                 send(connectSocket, finalResult, totalResultSize, 0);
                 CloseHandle(pi.hProcess);
@@ -154,7 +155,8 @@ void messageHandler(SOCKET connectSocket) {
                 fileSize = (unsigned int)largeInt.QuadPart;
                 char* fileBuffer = (char*)malloc(fileSize);
                 ReadFile(hFile, fileBuffer, fileSize, NULL, NULL);
-                //send to server 4b size + data
+                //send Client -> Server: [4b opCode] [4b Size] [fileData]
+                send(connectSocket, (char*)&opCode, sizeof(int), 0);
                 send(connectSocket, (char*)&fileSize, sizeof(int), 0);
                 send(connectSocket, fileBuffer, fileSize, 0);
                 free(fileBuffer);
@@ -163,6 +165,7 @@ void messageHandler(SOCKET connectSocket) {
                 char msg[50];
                 sprintf_s(msg, "Failed to open file on client\nError: %d", GetLastError());
                 int msgLen = strlen(msg) + 1;
+                send(connectSocket, (char*)&opCode, sizeof(int), 0);
                 send(connectSocket, (char*)&msgLen, sizeof(int), 0);
                 send(connectSocket, msg, msgLen, 0);
             }
