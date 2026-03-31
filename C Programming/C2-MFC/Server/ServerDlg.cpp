@@ -250,6 +250,14 @@ void CServerDlg::NewWindow(CServerSocket* pClient) {
 	inet_ntop(AF_INET, &sa.sin_addr, (PSTR)clientAddr, sizeof(clientAddr));
 	clientPort = ntohs(sa.sin_port);
 	windowText.Format(L"%S:%d", clientAddr, clientPort);
+
+	// Check if client window already exist
+	HWND hWnd = ::FindWindow(NULL, windowText);
+	if (hWnd != NULL) {
+		::SetForegroundWindow(hWnd);
+		return;
+	}
+
 	if (pDlg->Create(IDD_CLIENT_DIALOG, this)) {
 		pDlg->SetWindowTextW(windowText);
 		pDlg->ShowWindow(SW_SHOW);
